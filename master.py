@@ -3,11 +3,14 @@ import socket
 import signal
 import selectors
 import argparse
-from collections import deque
 from bidict import bidict
+from collections import deque
+from itertools import chain
+from functools import partial
 from logger import logger, name2level
-from utils import parse_netloc, set_non_blocking, format_addr
 from protocol import Protocol, PKGBuilder
+from utils import parse_netloc, set_non_blocking, \
+    format_addr, create_listening_sock
 
 
 class Master:
@@ -15,31 +18,21 @@ class Master:
     def __init__(self, pkgbuilder, tunnel_addr, expose_addr):
         self.pkgbuilder = pkgbuilder
         self._stopping = False
-        self._ready = deque()
+        self._ready = deque()  # task queue
         self.tunnel_pool = deque()
         self.work_pool = bidict()
         self._sel = selectors.DefaultSelector()
         self._buffer = []
-        self._listen_fds = []
 
-        self.init_wake_fds()
         self.init_signal()
 
-        self.expose_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.expose_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.expose_sock.bind(expose_addr)
-        self.expose_sock.listen(16)
-        self.expose_sock.setblocking(False)
-        self._sel.register(self.expose_sock, selectors.EVENT_READ, self.accept_expose)
+        self.expose_sock = create_listening_sock(expose_addr)
+        self._sel.register(self.expose_sock, selectors.EVENT_READ,
+                           self.accept_expose)
 
-        self.tunnel_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tunnel_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tunnel_sock.bind(tunnel_addr)
-        self.tunnel_sock.listen(16)
-        self.tunnel_sock.setblocking(False)
+        self.tunnel_sock = create_listening_sock(tunnel_addr)
         self._sel.register(self.tunnel_sock, selectors.EVENT_READ,
                            self.accept_tunnel)
-        self._listen_fds.append(self.tunnel_sock)
 
     def accept_tunnel(self, tunnel_sock, mask):
         """accept tunnel connection"""
@@ -56,80 +49,85 @@ class Master:
         conn, addr = expose_sock.accept()  # Should be ready
         conn.setblocking(False)
 
-        logger.info(f'accepted user connection from {format_addr(addr)}')
-
         self._sel.register(conn, selectors.EVENT_READ, self.transfer_from_expose)
+
+        logger.info(f'accept user connection from {format_addr(addr)}')
+
+    def find_available_tunnel(self):
+        while True:
+            try:
+                conn = self.tunnel_pool.popleft()
+            except IndexError:
+                # no available tunnel connection, just return
+                # do not need to wait in a loop, because we work in LT Mode
+                logger.info('no available tunnel connection, waiting')
+                return
+
+            if not self._handshake(conn):  # handshake first
+                conn.close()
+                return
+            return conn
 
     def transfer_from_expose(self, r_conn, mask):
         w_conn = self.work_pool.get(r_conn)
         if w_conn is None:
-            try:
-                w_conn = self.tunnel_pool.popleft()
-            except IndexError:
-                # no available tunnel connection, just return
-                # do not need to wait in a loop, because we work in LT Mode
+            w_conn = self.find_available_tunnel()
+            if w_conn is None:
                 return
-
-            if not self._handshake(w_conn):  # handshake first
-                w_conn.close()
-                r_conn.close()
-                return
-
             self.work_pool[r_conn] = w_conn
             self._sel.register(w_conn, selectors.EVENT_READ,
                                self.transfer_from_tunnel)
 
-        data = r_conn.recv(1024)
-        if not data:
-            logger.info(f'closing {r_conn}')
+        data = r_conn.recv(4096)  # TODO ConnectionResetError
+        if data == b'':
+            peer = r_conn.getpeername()
+            logger.info(f'closing user connection from {format_addr(peer)}')
             self._sel.unregister(r_conn)
+            self._sel.unregister(w_conn)
             r_conn.close()
+            w_conn.close()
+            del self.work_pool[r_conn]
             return
         logger.debug(f'tranfering {data!r} to {w_conn}')
         w_conn.send(data)
 
     def transfer_from_tunnel(self, r_conn, mask):
         w_conn = self.work_pool.inv.get(r_conn)
-        data = r_conn.recv(1024)
-        if not data:
-            logger.info(f'closing {r_conn}')
+        if w_conn is None:  # tunnel connection timeout
             self._sel.unregister(r_conn)
+            self.tunnel_pool.remove(r_conn)
             r_conn.close()
             return
+
+        data = r_conn.recv(4096)
+        if data == b'':
+            peer = r_conn.getpeername()
+            logger.info(f'closing tunnel connection from {format_addr(peer)}')
+            self._sel.unregister(r_conn)
+            self._sel.unregister(w_conn)
+            r_conn.close()
+            w_conn.close()
+            del self.work_pool[r_conn]
+            return
         logger.debug(f'tranfering {data!r} to {w_conn}')
-        w_conn.send(data)
+        try:
+            w_conn.send(data)
+        except socket.error as e:
+            if e.args[0] == socket.errno.EWOULDBLOCK:
+                logger.debug('EWOULDBLOCK occur')
+                import time
+                time.sleep(1)
+            w_conn.send(data)
 
     def exit(self):
         """close all listening fds"""
-        # TODO
-
-    def run_forever(self):
-        """main loop"""
-        while not self._stopping:
-            events = self._sel.select(timeout=1)
-            # logger.debug(events)
-            self._ready.extend(events)
-            for key, mask in events:
-                callback = key.data
-                callback(key.fileobj, mask)
-        logger.info('stopping now ...')
-        self.exit()
-
-    def init_wake_fds(self):
-        self._wake_fds = socket.socketpair()
-        for p in self._wake_fds:
-            set_non_blocking(p)
-
-    def init_signal(self):
-        signal.signal(signal.SIGINT, lambda *args: None)
-        signal.set_wakeup_fd(self._wake_fds[1].fileno())
-        self._sel.register(self._wake_fds[0], selectors.EVENT_READ,
-                           self.handle_signal)
-
-    def handle_signal(self, expose_sock, mask):
-        sig = self._wake_fds[0].recv(1)
-        logger.info('recving signal {}'.format(sig))
-        self._stopping = True
+        all_fds = chain(self._wake_fds, self.tunnel_pool,
+                        self.work_pool.keys())
+        for s in all_fds:
+            peer = s.getpeername()
+            if peer:  # socket.socketpair have empty peername
+                logger.info(f'closing conn from {format_addr(peer)}')
+            s.close()
 
     def _handshake(self, conn_slaver):
         conn_slaver.setblocking(True)  # TODO use nonblocking IO
@@ -139,6 +137,34 @@ class Master:
         if buff == b'':  # empty response
             return False
         return self.pkgbuilder.decode_verify(buff, self.pkgbuilder.PTYPE_HS_S2M)  # noqa
+
+    def run_forever(self):
+        """main loop"""
+        while not self._stopping:
+            events = self._sel.select(timeout=1)
+            self._ready.extend(events)  # TODO heartbeat
+            for key, mask in events:
+                callback = key.data
+                callback(key.fileobj, mask)
+        logger.info('stopping now ...')
+        self.exit()
+
+    def init_wake_fds(self):
+        self._wake_fds = socket.socketpair()
+        for p in self._wake_fds:
+            set_non_blocking(p)  # epoll need non-blocking fd
+
+    def init_signal(self):
+        self.init_wake_fds()
+        signal.signal(signal.SIGINT, lambda *args: None)
+        signal.set_wakeup_fd(self._wake_fds[1].fileno())
+        self._sel.register(self._wake_fds[0], selectors.EVENT_READ,
+                           self.handle_signal)
+
+    def handle_signal(self, expose_sock, mask):
+        sig = self._wake_fds[0].recv(1)
+        logger.info('recving signal {}'.format(sig))
+        self._stopping = True
 
 
 def parse_args():

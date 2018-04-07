@@ -1,4 +1,5 @@
 import os
+import socket
 import fcntl
 
 
@@ -14,3 +15,12 @@ def set_non_blocking(fd):
 
 def format_addr(addr):
     return '{}:{}'.format(*addr)
+
+
+def create_listening_sock(addr):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(addr)
+    sock.listen(16)
+    sock.setblocking(False)
+    return sock
