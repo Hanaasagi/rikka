@@ -22,7 +22,6 @@ class Master:
         self.tunnel_pool = deque()
         self.work_pool = bidict()
         self._sel = selectors.DefaultSelector()
-        self._buffer = []
 
         self.init_signal()
 
@@ -34,14 +33,17 @@ class Master:
         self._sel.register(self.tunnel_sock, selectors.EVENT_READ,
                            self.accept_tunnel)
 
+        self._listening_sock = [
+            self.expose_sock,
+            self.tunnel_sock,
+        ]
+
     def accept_expose(self, expose_sock, mask):
         """accept user connection"""
         conn, addr = expose_sock.accept()
         conn.setblocking(False)
 
-        q = (deque(), deque())
-        self._sel.register(conn, selectors.EVENT_READ,
-                           partial(self.transfer_from_expose, q=q))
+        self._sel.register(conn, selectors.EVENT_READ, self.prepare_transfer)
 
         logger.info(f'accept user connection from {format_addr(addr)}')
 
@@ -55,6 +57,31 @@ class Master:
         logger.info(f'accept tunnel connection from {format_addr(addr)}, '
                     f'poolsize is {len(self.tunnel_pool)}')
 
+    def prepare_transfer(self, expose_conn, mask):
+        tunnel_conn = self.find_available_tunnel()
+        if tunnel_conn is None:  # non-available tunnel_conn
+            return
+        self.work_pool[expose_conn] = tunnel_conn
+        q = (deque(), deque())
+        self._sel.register(tunnel_conn,
+                           selectors.EVENT_WRITE | selectors.EVENT_READ,
+                           partial(self.tunnel_dispatch, q=q))
+        self._sel.modify(expose_conn,
+                         selectors.EVENT_WRITE | selectors.EVENT_READ,
+                         partial(self.expose_dispatch, q=q))
+
+    def tunnel_dispatch(self, conn, mask, q):
+        if mask & selectors.EVENT_WRITE:
+            self.send_to_tunnel(conn, mask, q)
+        if mask & selectors.EVENT_READ:
+            self.transfer_from_tunnel(conn, mask, q)
+
+    def expose_dispatch(self, conn, mask, q):
+        if mask & selectors.EVENT_WRITE:
+            self.send_to_expose(conn, mask, q)
+        if mask & selectors.EVENT_READ:
+            self.transfer_from_expose(conn, mask, q)
+
     def transfer_from_expose(self, r_conn, mask, q):
         w_conn = self.work_pool.get(r_conn)
         if w_conn is None:
@@ -62,10 +89,6 @@ class Master:
             if w_conn is None:
                 return
             self.work_pool[r_conn] = w_conn
-            # self._sel.register(w_conn, selectors.EVENT_READ,
-                               # self.transfer_from_tunnel)
-            self._sel.register(w_conn, selectors.EVENT_WRITE,
-                               partial(self.send_to_tunnel, q=q))
 
         data = r_conn.recv(4096)  # TODO ConnectionResetError
         if data == b'':
@@ -79,9 +102,6 @@ class Master:
             return
         logger.debug(f'tranfering {data!r} to {w_conn}')
         q[0].append(data)
-        self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                         partial(self.send_to_tunnel, q=q))
-        # w_conn.send(data)
 
     def transfer_from_tunnel(self, r_conn, mask, q):
         w_conn = self.work_pool.inv.get(r_conn)
@@ -103,22 +123,18 @@ class Master:
         logger.debug(f'tranfering {data!r} to {w_conn}')
 
         q[1].append(data)
-        self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                         partial(self.send_to_expose, q=q))
 
     def send_to_tunnel(self, w_conn, mask, q):
         while len(q[0]):
             try:
                 data = q[0].popleft()
                 w_conn.send(data)
+                logger.debug(f'sending {data!r} to tunnel at {w_conn}')
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
+                    logger.info('EWOULDBLOCK occur in send to tunnel')
                     q[0].appendleft(data)
-                    break
-
-        self._sel.modify(w_conn, selectors.EVENT_READ,
-                         partial(self.transfer_from_tunnel, q=q))
+                    return
 
     def send_to_expose(self, w_conn, mask, q):
         while len(q[1]):
@@ -127,12 +143,9 @@ class Master:
                 w_conn.send(data)
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
+                    logger.info('EWOULDBLOCK occur in send to expose')
                     q[1].appendleft(data)
-                    break
-
-        self._sel.modify(w_conn, selectors.EVENT_READ,
-                         partial(self.transfer_from_tunnel, q=q))
+                    return
 
     def _handshake(self, conn_slaver):
         conn_slaver.setblocking(True)  # TODO use nonblocking IO
@@ -164,6 +177,8 @@ class Master:
         while not self._stopping:
             events = self._sel.select(timeout=1)
             # self._ready.extend(events)  # TODO heartbeat
+            # from pprint import pprint
+            # pprint(events)
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj, mask)
@@ -173,11 +188,8 @@ class Master:
     def exit(self):
         """close all listening fds"""
         all_fds = chain(self._wake_fds, self.tunnel_pool,
-                        self.work_pool.keys())
+                        self.work_pool.keys(), self._listening_sock)
         for s in all_fds:
-            peer = s.getpeername()
-            if peer:  # socket.socketpair have empty peername
-                logger.info(f'closing conn from {format_addr(peer)}')
             s.close()
 
     def init_wake_fds(self):
