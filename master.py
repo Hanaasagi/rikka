@@ -1,6 +1,7 @@
 import os
 import socket
 import signal
+import random
 import selectors
 import argparse
 from bidict import bidict
@@ -18,12 +19,13 @@ class Master:
     def __init__(self, pkgbuilder, tunnel_addr, expose_addr):
         self.pkgbuilder = pkgbuilder
         self._stopping = False
-        # self._ready = deque()  # task queue
+        self._ready = deque()  # task queue
         self.tunnel_pool = deque()
         self.work_pool = bidict()
         self._sel = selectors.DefaultSelector()
 
         self.init_signal()
+        self.reset_timeout()
 
         self.expose_sock = create_listening_sock(expose_addr)
         self._sel.register(self.expose_sock, selectors.EVENT_READ,
@@ -37,6 +39,17 @@ class Master:
             self.expose_sock,
             self.tunnel_sock,
         ]
+
+    def next_timeout(self):
+        """binary exponential backoff"""
+        self._timeout_count += 1
+        upper_bound = (2 ** min(self._timeout_count, 7)) - 1
+        self._timeout = random.randint(1, upper_bound)
+        self._timeout = 10
+
+    def reset_timeout(self):
+        self._timeout_count = 0
+        self._timeout = 1
 
     def accept_expose(self, expose_sock, mask):
         """accept user connection"""
@@ -60,6 +73,13 @@ class Master:
     def prepare_transfer(self, expose_conn, mask):
         tunnel_conn = self.find_available_tunnel()
         if tunnel_conn is None:  # non-available tunnel_conn
+            self._sel.unregister(expose_conn)
+            self._ready.append(
+                lambda: self._sel.register(
+                    expose_conn, selectors.EVENT_READ,
+                    self.prepare_transfer
+                )
+            )
             return
         self.work_pool[expose_conn] = tunnel_conn
         q = (deque(), deque())
@@ -85,10 +105,9 @@ class Master:
     def transfer_from_expose(self, r_conn, mask, q):
         w_conn = self.work_pool.get(r_conn)
         if w_conn is None:
-            w_conn = self.find_available_tunnel()
-            if w_conn is None:
-                return
-            self.work_pool[r_conn] = w_conn
+            self._sel.unregister(r_conn)
+            r_conn.close()
+            return
 
         data = r_conn.recv(4096)  # TODO ConnectionResetError
         if data == b'':
@@ -164,19 +183,25 @@ class Master:
             except IndexError:
                 # no available tunnel connection, just return
                 # do not need to wait in a loop, because we work in LT Mode
+                self.next_timeout()
                 logger.info('no available tunnel connection, waiting')
                 return
+            else:
+                self.reset_timeout()
 
             if not self._handshake(conn):  # handshake first
                 conn.close()
-                return
+                continue
             return conn
 
     def run_forever(self):
         """main loop"""
         while not self._stopping:
-            events = self._sel.select(timeout=1)
-            # self._ready.extend(events)  # TODO heartbeat
+            events = self._sel.select(timeout=self._timeout)
+            for job in self._ready:  # TODO heartbeat
+                job()
+            self._ready.clear()
+
             # from pprint import pprint
             # pprint(events)
             for key, mask in events:
