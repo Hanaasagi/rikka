@@ -58,7 +58,6 @@ class Master:
         self._timeout_count += 1
         upper_bound = (2 ** min(self._timeout_count, 7)) - 1
         self._timeout = random.randint(1, upper_bound)
-        self._timeout = 10
 
     def reset_timeout(self):
         """reset timeout to initial value"""
@@ -193,7 +192,6 @@ class Master:
             if e.args[POS] == socket.errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[POS].appendleft(data[byte:])
-                return
 
     def send_to_expose(self, w_conn, mask, buf):
         """send buffer data to expose"""
@@ -210,7 +208,6 @@ class Master:
             if e.args[0] == socket.errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to expose')
                 buf[NEG].appendleft(data[byte:])
-                return
 
     def _handshake(self, conn_slaver):
         """handshake"""
