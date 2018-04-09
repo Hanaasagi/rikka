@@ -109,7 +109,7 @@ class Master:
             r_conn.close()
             return
 
-        data = r_conn.recv(4096)  # TODO ConnectionResetError
+        data = r_conn.recv(1024)  # TODO ConnectionResetError
         if data == b'':
             peer = r_conn.getpeername()
             logger.info(f'closing user connection from {format_addr(peer)}')
@@ -129,13 +129,14 @@ class Master:
             r_conn.close()
             return
 
-        data = r_conn.recv(4096)
+        data = r_conn.recv(1024)
         if data == b'':
             peer = r_conn.getpeername()
             logger.info(f'closing tunnel connection from {format_addr(peer)}')
             self._sel.unregister(r_conn)
             # self._sel.unregister(w_conn)
             r_conn.close()
+            q[1].append(None)
             # w_conn.close()
             del self.work_pool.inv[r_conn]
             return
@@ -159,6 +160,10 @@ class Master:
         while len(q[1]):
             try:
                 data = q[1].popleft()
+                if data is None:
+                    self._sel.unregister(w_conn)  # TODO
+                    w_conn.close()
+                    return
                 w_conn.send(data)
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
