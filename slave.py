@@ -108,6 +108,7 @@ class Slave:
 
         data = r_conn.recv(1024)
         if data == b'':
+            exit()
             peer = r_conn.getpeername()
             logger.info(f'closing tunnel connection from {format_addr(peer)}')
             q[0].append(None)
@@ -132,11 +133,11 @@ class Slave:
                     self._sel.unregister(w_conn)
                     w_conn.close()
                     return
-                w_conn.send(data)
+                byte = w_conn.send(data)
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
-                    q[0].appendleft(data)
+                    logger.info('EWOULDBLOCK occur in send to dest')
+                    q[0].appendleft(data[byte:])
                     break
         # self._sel.modify(w_conn, selectors.EVENT_READ,
                          # partial(self.transfer_from_dest, q=q))
@@ -150,6 +151,7 @@ class Slave:
 
         data = r_conn.recv(1024)
         if data == b'':
+            exit()
             peer = r_conn.getpeername()
             logger.info(f'closing dest connection from {format_addr(peer)}')
             q[1].append(None)
@@ -174,11 +176,11 @@ class Slave:
                     self._sel.unregister(w_conn)
                     w_conn.close()
                     return
-                w_conn.send(data)
+                byte = w_conn.send(data)
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
-                    q[1].appendleft(data)
+                    logger.info('EWOULDBLOCK occur in send to tunnel')
+                    q[1].appendleft(data[byte:])
                     break
         # self._sel.modify(w_conn, selectors.EVENT_READ,
                          # partial(self.transfer_from_tunnel, q=q))
@@ -190,9 +192,9 @@ class Slave:
     def run_forever(self):
         while not self._stopping:
             self.manage_tunnel()
+            import time
+            time.sleep(0.01)
             events = self._sel.select(timeout=1)
-            # from pprint import pprint
-            # pprint(events)
             # self._ready.extend(events)
             for key, mask in events:
                 callback = key.data

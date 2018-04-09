@@ -111,8 +111,8 @@ class Master:
 
         data = r_conn.recv(1024)  # TODO ConnectionResetError
         if data == b'':
-            peer = r_conn.getpeername()
-            logger.info(f'closing user connection from {format_addr(peer)}')
+            # peer = r_conn.getpeername()
+            # logger.info(f'closing user connection from {format_addr(peer)}')
             self._sel.unregister(r_conn)
             # self._sel.unregister(w_conn)
             r_conn.close()
@@ -131,8 +131,8 @@ class Master:
 
         data = r_conn.recv(1024)
         if data == b'':
-            peer = r_conn.getpeername()
-            logger.info(f'closing tunnel connection from {format_addr(peer)}')
+            # peer = r_conn.getpeername()
+            # logger.info(f'closing tunnel connection from {format_addr(peer)}')
             self._sel.unregister(r_conn)
             # self._sel.unregister(w_conn)
             r_conn.close()
@@ -148,12 +148,12 @@ class Master:
         while len(q[0]):
             try:
                 data = q[0].popleft()
-                w_conn.send(data)
+                byte = w_conn.send(data)
                 logger.debug(f'sending {data!r} to tunnel at {w_conn}')
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
                     logger.info('EWOULDBLOCK occur in send to tunnel')
-                    q[0].appendleft(data)
+                    q[0].appendleft(data[byte:])
                     return
 
     def send_to_expose(self, w_conn, mask, q):
@@ -164,11 +164,12 @@ class Master:
                     self._sel.unregister(w_conn)  # TODO
                     w_conn.close()
                     return
-                w_conn.send(data)
+                byte = w_conn.send(data)
             except socket.error as e:
                 if e.args[0] == socket.errno.EWOULDBLOCK:
+                    # print(byte, len(data), len(q[1]))
                     logger.info('EWOULDBLOCK occur in send to expose')
-                    q[1].appendleft(data)
+                    q[1].appendleft(data[byte:])
                     return
 
     def _handshake(self, conn_slaver):
