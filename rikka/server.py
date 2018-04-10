@@ -8,6 +8,7 @@ from bidict import bidict
 from collections import deque
 from functools import partial
 from itertools import chain
+from rikka.config import Config, ConfigAttribute
 from rikka.logger import logger, name2level
 from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE
 from rikka.utils import parse_netloc, set_non_blocking, \
@@ -20,14 +21,16 @@ NEG = 1  # tunnel to expose
 
 class Server:
 
-    def __init__(self, pkgbuilder, tunnel_addr, expose_addr):
+    tunnel_addr = ConfigAttribute('tunnel', parse_netloc)
+    expose_addr = ConfigAttribute('bind', parse_netloc)
+
+    def __init__(self, pkgbuilder, config):
         self._ready = deque()  # task queue
+        self._config = config
         self._stopping = False
         self._pkgbuilder = pkgbuilder
         self._sel = selectors.DefaultSelector()
 
-        self.tunnel_addr = tunnel_addr
-        self.expose_addr = expose_addr
         self.tunnel_pool = deque()
         self.work_pool = bidict()
 
@@ -37,6 +40,10 @@ class Server:
         self.reset_timeout()
 
         self.start_listen()
+
+    @property
+    def config(self):
+        return self._config
 
     def start_listen(self):
         """listen expose conn and tunnel conn"""
@@ -284,10 +291,8 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('-c', '--config', default=None, help='config path')
-    parser.add_argument('-t', '--tunnel', required=True,
-                        metavar='host:port', help='')
-    parser.add_argument('-b', '--bind', required=True,
-                        metavar='host:port', help='')
+    parser.add_argument('-t', '--tunnel', metavar='host:port', help='')
+    parser.add_argument('-b', '--bind', metavar='host:port', help='')
     parser.add_argument('-k', '--secretkey', default='secretkey', help='')
     parser.add_argument('-l', '--level', default='info', help='')
     parser.add_argument('--ttl', default=300, type=int, dest='ttl', help='')
@@ -297,15 +302,20 @@ def parse_args():
 
 def main():
     args = parse_args()
-    tunnel_addr = parse_netloc(args.tunnel)
-    expose_addr= parse_netloc(args.bind)
-    logger.setLevel(name2level(args.level))
+    config_path = args.config
+    delattr(args, 'config')
 
-    Protocol.set_secret_key(args.secretkey)
+    config = Config.from_object(args)
+    if config_path is not None:
+        config.load_file(config_path)
+
+    logger.setLevel(name2level(config.level))
+
+    Protocol.set_secret_key(config.secretkey)
     Protocol.recalc_crc32()
     pkgbuilder = PKGBuilder(Protocol)
 
-    master = Server(pkgbuilder, tunnel_addr, expose_addr)
+    master = Server(pkgbuilder, config)
     logger.debug('PID: {}'.format(os.getpid()))
     logger.info('init successful, running as master')
     master.run_forever()
