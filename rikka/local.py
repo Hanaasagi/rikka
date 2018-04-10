@@ -8,6 +8,7 @@ from bidict import bidict
 from collections import deque
 from functools import partial
 from itertools import chain
+from rikka.config import Config, ConfigAttribute
 from rikka.logger import logger, name2level
 from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE
 from rikka.utils import parse_netloc, set_non_blocking, format_addr
@@ -18,20 +19,26 @@ NEG = 1  # from dest to tunnel
 
 class Local:
 
-    def __init__(self, pkgbuilder, tunnel_addr, dest_addr, max_spare_count=5):
+    tunnel_addr = ConfigAttribute('tunnel', parse_netloc)
+    dest_addr = ConfigAttribute('dest', parse_netloc)
+    max_spare_count = ConfigAttribute('max_spare_count')
+
+    def __init__(self, pkgbuilder, config):
         self._ready = deque()
+        self._config = config
         self._stopping = False
         self._pkgbuilder = pkgbuilder
-        self.max_spare_count = max_spare_count
         self._sel = selectors.DefaultSelector()
 
-        self.tunnel_addr = tunnel_addr
-        self.dest_addr = dest_addr
         self.tunnel_pool = deque()
         self.working_pool = bidict()
 
         self.init_signal()
         self.reset_timeout()
+
+    @property
+    def config(self):
+        return self._config
 
     def next_timeout(self):
         """binary exponential backoff"""
@@ -269,10 +276,8 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('-c', '--config', default=None, help='config path')
-    parser.add_argument('-t', '--tunnel', required=True,
-                        metavar='host:port', help='')
-    parser.add_argument('-d', '--dest', required=True,
-                        metavar='host:port', help='')
+    parser.add_argument('-t', '--tunnel', metavar='host:port', help='')
+    parser.add_argument('-d', '--dest', metavar='host:port', help='')
     parser.add_argument('-k', '--secretkey', default='secretkey', help='')
     parser.add_argument('-l', '--level', default='info', help='verbose output')
     parser.add_argument('--ttl', default=300, type=int, dest='ttl', help='')
@@ -284,20 +289,24 @@ def parse_args():
 
 def main():
     args = parse_args()
-    tunnel_addr = parse_netloc(args.tunnel)
-    dest_addr = parse_netloc(args.dest)
-    max_spare_count = args.max_spare_count
+    config_path = args.config
+    delattr(args, 'config')
+
+    config = Config.from_object(args)
+    if config_path is not None:
+        config.load_file(config_path)
+
     logger.setLevel(name2level(args.level))
 
     Protocol.set_secret_key(args.secretkey)
     Protocol.recalc_crc32()
     pkgbuilder = PKGBuilder(Protocol)
 
-    slaver = Local(pkgbuilder, tunnel_addr, dest_addr, max_spare_count)
+    local_ = Local(pkgbuilder, config)
     logger.debug('PID: {}'.format(os.getpid()))
-    logger.info('init successful, running as slaver')
+    logger.info('init successful, running as local')
 
-    slaver.run_forever()
+    local_.run_forever()
 
 
 if __name__ == '__main__':
