@@ -8,15 +8,15 @@ from bidict import bidict
 from collections import deque
 from functools import partial
 from itertools import chain
-from logger import logger, name2level
-from protocol import Protocol, PKGBuilder, BUF_SIZE
-from utils import parse_netloc, set_non_blocking, format_addr
+from rikka.logger import logger, name2level
+from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE
+from rikka.utils import parse_netloc, set_non_blocking, format_addr
 
 POS = 0  # from tunnel to dest
 NEG = 1  # from dest to tunnel
 
 
-class Slave:
+class Local:
 
     def __init__(self, pkgbuilder, tunnel_addr, dest_addr, max_spare_count=5):
         self._ready = deque()
@@ -293,7 +293,7 @@ def main():
     Protocol.recalc_crc32()
     pkgbuilder = PKGBuilder(Protocol)
 
-    slaver = Slave(pkgbuilder, tunnel_addr, dest_addr, max_spare_count)
+    slaver = Local(pkgbuilder, tunnel_addr, dest_addr, max_spare_count)
     logger.debug('PID: {}'.format(os.getpid()))
     logger.info('init successful, running as slaver')
 

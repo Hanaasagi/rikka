@@ -8,9 +8,9 @@ from bidict import bidict
 from collections import deque
 from functools import partial
 from itertools import chain
-from logger import logger, name2level
-from protocol import Protocol, PKGBuilder, BUF_SIZE
-from utils import parse_netloc, set_non_blocking, \
+from rikka.logger import logger, name2level
+from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE
+from rikka.utils import parse_netloc, set_non_blocking, \
     format_addr, create_listening_sock
 
 
@@ -18,7 +18,7 @@ POS = 0  # expose to tunnel
 NEG = 1  # tunnel to expose
 
 
-class Master:
+class Server:
 
     def __init__(self, pkgbuilder, tunnel_addr, expose_addr):
         self._ready = deque()  # task queue
@@ -305,7 +305,7 @@ def main():
     Protocol.recalc_crc32()
     pkgbuilder = PKGBuilder(Protocol)
 
-    master = Master(pkgbuilder, tunnel_addr, expose_addr)
+    master = Server(pkgbuilder, tunnel_addr, expose_addr)
     logger.debug('PID: {}'.format(os.getpid()))
     logger.info('init successful, running as master')
     master.run_forever()
