@@ -1,39 +1,66 @@
 import os
 import socket
 import signal
+import random
 import selectors
 import argparse
+from bidict import bidict
 from collections import deque
 from functools import partial
-from bidict import bidict
-from protocol import Protocol, PKGBuilder
-from utils import parse_netloc, set_non_blocking, format_addr
+from itertools import chain
 from logger import logger, name2level
+from protocol import Protocol, PKGBuilder, BUF_SIZE
+from utils import parse_netloc, set_non_blocking, format_addr
+
+POS = 0  # from tunnel to dest
+NEG = 1  # from dest to tunnel
 
 
 class Slave:
 
     def __init__(self, pkgbuilder, tunnel_addr, dest_addr, max_spare_count=5):
-        self.pkgbuilder = pkgbuilder
-        self._stopping = False
         self._ready = deque()
-        self.tunnel_addr = tunnel_addr
-        self.dest_addr = dest_addr
+        self._stopping = False
+        self._pkgbuilder = pkgbuilder
         self.max_spare_count = max_spare_count
-        self.tunnel_pool = deque()
-        self.working_pool = bidict()
         self._sel = selectors.DefaultSelector()
 
+        self.tunnel_addr = tunnel_addr
+        self.dest_addr = dest_addr
+        self.tunnel_pool = deque()
+        self.working_pool = bidict()
+
         self.init_signal()
+        self.reset_timeout()
+
+    def next_timeout(self):
+        """binary exponential backoff"""
+        self._timeout_count += 1
+        upper_bound = (2 ** min(self._timeout_count, 7)) - 1
+        self._timeout = random.randint(1, upper_bound)
+
+    def reset_timeout(self):
+        """reset timeout to initial value"""
+        self._timeout = 1
+        self._timeout_count = 0
 
     def _connect_tunnel(self):
         """establish tunnel connection"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(self.tunnel_addr)
+        try:
+            sock.connect(self.tunnel_addr)
+        except ConnectionError:
+            self.next_timeout()
+            logger.warn(f'master is unreachable, '
+                        f'retry after {self._timeout}sec...')  # noqa
+            return False
+
+        self.reset_timeout()
         self._sel.register(sock, selectors.EVENT_READ, self.prepare_transfer)
         self.tunnel_pool.append(sock)
         logger.info(f'connect to tunnel {format_addr(self.tunnel_addr)}, '
                     f'poolsize is {len(self.tunnel_pool)}')
+        return True
 
     def _connect_dest(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -54,15 +81,16 @@ class Slave:
         return sock
 
     def _handshake(self, conn):
-        buff = conn.recv(self.pkgbuilder.PACKAGE_SIZE)
+        buff = conn.recv(self._pkgbuilder.PACKAGE_SIZE)
         if (buff == b'' or not
-                self.pkgbuilder.decode_verify(buff, self.pkgbuilder.PTYPE_HS_M2S)):
+                self._pkgbuilder.decode_verify(buff, self._pkgbuilder.PTYPE_HS_M2S)):
             logger.info('handshake failed')
             conn.close()
             return False
+
         logger.debug('handshake successful')
         conn.setblocking(True)  # TODO
-        conn.send(self.pkgbuilder.pbuild_hs_s2m())
+        conn.send(self._pkgbuilder.pbuild_hs_s2m())
         conn.setblocking(False)
         return True
 
@@ -72,7 +100,8 @@ class Slave:
             self._sel.unregister(conn)
             conn.close()
             return
-        # connect dest after handshake
+
+        # connect dest after handshake successed
         sock = self._connect_dest()
         if sock is None:
             self._sel.unregister(conn)
@@ -81,119 +110,128 @@ class Slave:
 
         self.working_pool[conn] = sock
 
-        q = (deque(), deque())
+        buf = (deque(), deque())
         self._sel.modify(conn, selectors.EVENT_WRITE | selectors.EVENT_READ,
-                         partial(self.tunnel_dispatch, q=q))
+                         partial(self.dispatch_tunnel, buf=buf))
         self._sel.register(sock, selectors.EVENT_WRITE | selectors.EVENT_READ,
-                           partial(self.dest_dispatch, q=q))
+                           partial(self.dispatch_dest, buf=buf))
 
-    def tunnel_dispatch(self, conn, mask, q):
+    def dispatch_tunnel(self, conn, mask, buf):
+        """schedule tunnel events"""
         if mask & selectors.EVENT_WRITE:
-            self.send_to_tunnel(conn, mask, q)
+            self.send_to_tunnel(conn, mask, buf)
         if mask & selectors.EVENT_READ:
-            self.transfer_from_tunnel(conn, mask, q)
+            self.transfer_from_tunnel(conn, mask, buf)
 
-    def dest_dispatch(self, conn, mask, q):
+    def dispatch_dest(self, conn, mask, buf):
+        """schedule dest events"""
         if mask & selectors.EVENT_WRITE:
-            self.send_to_dest(conn, mask, q)
+            self.send_to_dest(conn, mask, buf)
         if mask & selectors.EVENT_READ:
-            self.transfer_from_dest(conn, mask, q)
+            self.transfer_from_dest(conn, mask, buf)
 
-    def transfer_from_tunnel(self, r_conn, mask, q):
+    def transfer_from_tunnel(self, r_conn, mask, buf):
+        """receive data from tunnel and store in buffer"""
         w_conn = self.working_pool.get(r_conn)
         if w_conn is None:
             self._sel.unregister(r_conn)
             r_conn.close()
             return
 
-        data = r_conn.recv(1024)
-        if data == b'':
-            peer = r_conn.getpeername()
-            logger.info(f'closing tunnel connection from {format_addr(peer)}')
-            q[0].append(None)
+        data = b''
+        need_close = False
+        try:
+            data = r_conn.recv(BUF_SIZE)
+        except ConnectionError:
+            need_close = True
+
+        if data == b'' or need_close:
+            try:
+                peer = r_conn.getpeername()
+                logger.info(f'closing tunnel connection from {format_addr(peer)}')
+            except OSError as e:
+                logger.warn(e)
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                             partial(self.send_to_dest, q=q))
+                             partial(self.send_to_dest, buf=buf))
             r_conn.close()
+            buf[POS].append(None)
             del self.working_pool[r_conn]
             return
-        logger.debug(f'tranfering {data!r} to {w_conn}')
 
-        q[0].append(data)
-        # self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                         # partial(self.send_to_dest, q=q))
-        # w_conn.send(data)
+        buf[POS].append(data)
 
-    def send_to_dest(self, w_conn, mask, q):
-        while len(q[0]):
-            try:
-                data = q[0].popleft()
-                if data is None:
-                    self._sel.unregister(w_conn)
-                    w_conn.close()
-                    return
-                w_conn.send(data)
-            except socket.error as e:
-                if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
-                    q[0].appendleft(data)
-                    break
-        # self._sel.modify(w_conn, selectors.EVENT_READ,
-                         # partial(self.transfer_from_dest, q=q))
-
-    def transfer_from_dest(self, r_conn, mask, q):
+    def transfer_from_dest(self, r_conn, mask, buf):
+        """receive data from dest and store in buffer"""
         w_conn = self.working_pool.inv.get(r_conn)
         if w_conn is None:
             self._sel.unregister(r_conn)
             r_conn.close()
             return
 
-        data = r_conn.recv(1024)
-        if data == b'':
-            peer = r_conn.getpeername()
-            logger.info(f'closing dest connection from {format_addr(peer)}')
-            q[1].append(None)
+        data = b''
+        need_close = False
+
+        try:
+            data = r_conn.recv(BUF_SIZE)
+        except ConnectionError:
+            need_close = True
+
+        if data == b'' or need_close:
+            try:
+                peer = r_conn.getpeername()
+                logger.info(f'closing dest connection from {format_addr(peer)}')
+            except OSError as e:
+                logger.warn(e)
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                             partial(self.send_to_tunnel, q=q))
+                             partial(self.send_to_tunnel, buf=buf))
             r_conn.close()
+            buf[NEG].append(None)
             del self.working_pool.inv[r_conn]
             return
-        logger.debug(f'tranfering {data!r} to '
-                     f'{format_addr(w_conn.getpeername())}')
-        q[1].append(data)
-        # self._sel.modify(w_conn, selectors.EVENT_WRITE,
-                         # partial(self.send_to_tunnel, q=q))
-        # w_conn.send(data)
 
-    def send_to_tunnel(self, w_conn, mask, q):
-        while len(q[1]):
-            try:
-                data = q[1].popleft()
-                if data is None:
-                    self._sel.unregister(w_conn)
-                    w_conn.close()
-                    return
-                w_conn.send(data)
-            except socket.error as e:
-                if e.args[0] == socket.errno.EWOULDBLOCK:
-                    logger.info('EWOULDBLOCK occur')
-                    q[1].appendleft(data)
-                    break
-        # self._sel.modify(w_conn, selectors.EVENT_READ,
-                         # partial(self.transfer_from_tunnel, q=q))
+        buf[NEG].append(data)
+
+    def send_to_dest(self, w_conn, mask, buf):
+        if not len(buf[POS]):
+            return
+        try:
+            data = buf[POS].popleft()
+            if data is None:
+                self._sel.unregister(w_conn)
+                w_conn.close()
+                return
+            byte = w_conn.send(data)
+        except socket.error as e:
+            if e.args[0] == socket.errno.EWOULDBLOCK:
+                logger.info('EWOULDBLOCK occur in send to dest')
+                buf[POS].appendleft(data[byte:])
+
+    def send_to_tunnel(self, w_conn, mask, buf):
+        if not len(buf[NEG]):
+            return
+        try:
+            data = buf[NEG].popleft()
+            if data is None:
+                self._sel.unregister(w_conn)
+                w_conn.close()
+                return
+            byte = w_conn.send(data)
+        except socket.error as e:
+            if e.args[0] == socket.errno.EWOULDBLOCK:
+                logger.info('EWOULDBLOCK occur in send to tunnel')
+                buf[NEG].appendleft(data[byte:])
 
     def manage_tunnel(self):
         while len(self.tunnel_pool) < self.max_spare_count:
-            self._connect_tunnel()
+            if not self._connect_tunnel():  # connect failed
+                break
 
     def run_forever(self):
         while not self._stopping:
             self.manage_tunnel()
-            events = self._sel.select(timeout=1)
-            # from pprint import pprint
-            # pprint(events)
-            # self._ready.extend(events)
+            events = self._sel.select(timeout=self._timeout)
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj, mask)
@@ -202,7 +240,11 @@ class Slave:
         self.exit()
 
     def exit(self):
-        pass
+        """close all listening fds"""
+        all_fds = chain(self._wake_fds, self.tunnel_pool,
+                        *zip(*self.working_pool.items()))
+        for s in all_fds:
+            s.close()
 
     def init_wake_fds(self):
         self._wake_fds = socket.socketpair()

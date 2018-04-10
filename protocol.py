@@ -2,6 +2,7 @@ import struct
 import binascii
 
 INTERNAL_VERSION = 0x000D
+BUF_SIZE = 4096
 
 
 class Protocol:
