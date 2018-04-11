@@ -74,7 +74,7 @@ class PKGBuilder:
 
     def pbuild_hs_s2m(self):
         return self._build_bytes(pkg_type=self.protocol.PTYPE_HS_S2M,
-                                 data=( self.protocol.SECRET_KEY_REVERSED_CRC32,))  # noqa
+                                 data=(self.protocol.SECRET_KEY_REVERSED_CRC32,))  # noqa
 
     def pbuild_heart_beat(self):
         return self._build_bytes(pkg_type=self.PTYPE_HEART_BEAT)
@@ -112,3 +112,7 @@ class PKGBuilder:
         elif pkg_type == self.PTYPE_HS_M2S:
             return pkg['data'][0] == self.SECRET_KEY_CRC32
         return True
+
+
+# use for stop
+sentinel = type('Sentinel', (object,), {})

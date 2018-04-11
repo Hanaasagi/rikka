@@ -10,7 +10,8 @@ from functools import partial
 from itertools import chain
 from rikka.config import Config, ConfigAttribute
 from rikka.logger import logger, name2level
-from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE
+from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE, \
+    sentinel
 from rikka.utils import parse_netloc, set_non_blocking, format_addr
 
 POS = 0  # from tunnel to dest
@@ -162,7 +163,7 @@ class Local:
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_dest, buf=buf))
             r_conn.close()
-            buf[POS].append(None)
+            buf[POS].append(sentinel)
             del self.working_pool[r_conn]
             return
 
@@ -194,7 +195,7 @@ class Local:
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_tunnel, buf=buf))
             r_conn.close()
-            buf[NEG].append(None)
+            buf[NEG].append(sentinel)
             del self.working_pool.inv[r_conn]
             return
 
@@ -205,7 +206,7 @@ class Local:
             return
         try:
             data = buf[POS].popleft()
-            if data is None:
+            if data is sentinel:
                 self._sel.unregister(w_conn)
                 w_conn.close()
                 return
@@ -220,7 +221,7 @@ class Local:
             return
         try:
             data = buf[NEG].popleft()
-            if data is None:
+            if data is sentinel:
                 self._sel.unregister(w_conn)
                 w_conn.close()
                 return
