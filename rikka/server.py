@@ -198,7 +198,7 @@ class Server:
                 return
             byte = w_conn.send(data)
         except socket.error as e:
-            if e.args[POS] == socket.errno.EWOULDBLOCK:
+            if e.args[0] == socket.errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[POS].appendleft(data[byte:])
 
