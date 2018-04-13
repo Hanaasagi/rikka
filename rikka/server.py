@@ -9,6 +9,7 @@ from collections import deque
 from functools import partial
 from itertools import chain
 from rikka.config import Config, ConfigAttribute
+from rikka.exception import ConfigMissing
 from rikka.logger import logger, name2level
 from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE, \
     sentinel
@@ -297,7 +298,7 @@ def parse_args():
     parser.add_argument('-b', '--bind', metavar='host:port', help='')
     parser.add_argument('-k', '--secretkey', default='secretkey', help='')
     parser.add_argument('-l', '--level', default='info', help='')
-    parser.add_argument('--ttl', default=300, type=int, dest='ttl', help='')
+    # parser.add_argument('--ttl', default=300, type=int, dest='ttl', help='')
 
     return parser.parse_args()
 
@@ -307,9 +308,19 @@ def main():
     config_path = args.config
     delattr(args, 'config')
 
-    config = Config.from_object(args)
+    config = Config()
     if config_path is not None:
         config.load_file(config_path)
+    config.from_object(args)
+    try:
+        config.validate([
+            'tunnel',
+            'bind',
+            'secretkey',
+        ])
+    except ConfigMissing as e:
+        logger.error(e)
+        exit()
 
     logger.setLevel(name2level(config.level))
 

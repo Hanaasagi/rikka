@@ -1,6 +1,6 @@
 import json
 from collections import UserDict
-# from sea.datatypes import ConstantsObject
+from rikka.exception import ConfigMissing
 
 
 class ConfigAttribute:
@@ -24,14 +24,22 @@ class ConfigAttribute:
 
 class Config(UserDict):
 
-    @classmethod
-    def from_object(cls, obj):
-        return cls(**obj.__dict__)
+    def from_object(self, obj):
+        self.merge(obj.__dict__)
 
     def load_file(self, path):
         with open(path, 'r') as f:
             data = json.load(f)
             self.update(data)
 
+    def merge(self, d):
+        for k, v in d.items():
+            self.data[k] = v
+
     def __getattr__(self, attr):
         return self.data[attr]
+
+    def validate(self, attrs):
+        for attr in attrs:
+            if self.data.get(attr) is None:
+                raise ConfigMissing(attr)
