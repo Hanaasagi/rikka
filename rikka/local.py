@@ -15,6 +15,8 @@ from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE, \
     sentinel
 from rikka.utils import parse_netloc, set_non_blocking, format_addr
 
+from argparse import Namespace
+from socket import socket as socket_t
 POS = 0  # from tunnel to dest
 NEG = 1  # from dest to tunnel
 
@@ -25,7 +27,7 @@ class Local:
     dest_addr = ConfigAttribute('dest', parse_netloc)
     max_spare_count = ConfigAttribute('max_spare_count')
 
-    def __init__(self, pkgbuilder, config):
+    def __init__(self, pkgbuilder: PKGBuilder, config: Config) -> None:
         self._ready = deque()
         self._config = config
         self._stopping = False
@@ -39,21 +41,21 @@ class Local:
         self.reset_timeout()
 
     @property
-    def config(self):
+    def config(self) -> Config:
         return self._config
 
-    def next_timeout(self):
+    def next_timeout(self) -> None:
         """binary exponential backoff"""
         self._timeout_count += 1
         upper_bound = (2 ** min(self._timeout_count, 7)) - 1
         self._timeout = random.randint(1, upper_bound)
 
-    def reset_timeout(self):
+    def reset_timeout(self) -> None:
         """reset timeout to initial value"""
         self._timeout = 1
         self._timeout_count = 0
 
-    def _connect_tunnel(self):
+    def _connect_tunnel(self) -> bool:
         """establish tunnel connection"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -232,12 +234,12 @@ class Local:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[NEG].appendleft(data[byte:])
 
-    def manage_tunnel(self):
+    def manage_tunnel(self) -> None:
         while len(self.tunnel_pool) < self.max_spare_count:
             if not self._connect_tunnel():  # connect failed
                 break
 
-    def run_forever(self):
+    def run_forever(self) -> None:
         while not self._stopping:
             self.manage_tunnel()
             events = self._sel.select(timeout=self._timeout)
@@ -248,32 +250,32 @@ class Local:
         logger.info('stopping now ...')
         self.exit()
 
-    def exit(self):
+    def exit(self) -> None:
         """close all listening fds"""
         all_fds = chain(self._wake_fds, self.tunnel_pool,
                         *zip(*self.working_pool.items()))
         for s in all_fds:
             s.close()
 
-    def init_wake_fds(self):
+    def init_wake_fds(self) -> None:
         self._wake_fds = socket.socketpair()
         for p in self._wake_fds:
             set_non_blocking(p)
 
-    def init_signal(self):
+    def init_signal(self) -> None:
         self.init_wake_fds()
         signal.signal(signal.SIGINT, lambda *args: None)
         signal.set_wakeup_fd(self._wake_fds[1].fileno())
         self._sel.register(self._wake_fds[0], selectors.EVENT_READ,
                            self.handle_signal)
 
-    def handle_signal(self, expose_sock, mask):
+    def handle_signal(self, expose_sock: socket_t, mask: int) -> None:
         sig = self._wake_fds[0].recv(1)
         logger.info('recving signal {}'.format(sig))
         self._stopping = True
 
 
-def parse_args():
+def parse_args() -> Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -289,7 +291,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = parse_args()
     config_path = args.config
     delattr(args, 'config')

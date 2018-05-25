@@ -10,7 +10,7 @@ sh.setFormatter(formatter)
 logger.addHandler(sh)
 
 
-def name2level(level):
+def name2level(level: str) -> int:
     return logging.__dict__.get(level.upper())
 
 

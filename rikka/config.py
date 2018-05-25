@@ -3,14 +3,19 @@ from collections import UserDict
 from rikka.exception import ConfigMissing
 
 
+from argparse import Namespace
+
+from typing import Callable, Dict, List, Optional, Tuple, Union, Any
+
+
 class ConfigAttribute:
     """Makes an attribute forward to the config"""
 
-    def __init__(self, name, get_converter=None):
+    def __init__(self, name: str, get_converter: Optional[Callable] = None) -> None:
         self.__name__ = name
         self.get_converter = get_converter
 
-    def __get__(self, obj, tp=None):
+    def __get__(self, obj: Any, tp=None) -> Union[Tuple[str, int], int]:
         if obj is None:
             return self
         rv = obj.config[self.__name__]
@@ -24,7 +29,7 @@ class ConfigAttribute:
 
 class Config(UserDict):
 
-    def from_object(self, obj):
+    def from_object(self, obj: Namespace) -> None:
         self.merge(obj.__dict__)
 
     def load_file(self, path):
@@ -32,14 +37,14 @@ class Config(UserDict):
             data = json.load(f)
             self.update(data)
 
-    def merge(self, d):
+    def merge(self, d: Dict[str, Union[str, int]]) -> None:
         for k, v in d.items():
             self.data[k] = v
 
     def __getattr__(self, attr):
         return self.data[attr]
 
-    def validate(self, attrs):
+    def validate(self, attrs: List[str]) -> None:
         for attr in attrs:
             if self.data.get(attr) is None:
                 raise ConfigMissing(attr)

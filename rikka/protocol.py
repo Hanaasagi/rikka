@@ -33,11 +33,11 @@ class Protocol:
     }
 
     @classmethod
-    def set_secret_key(cls, secretkey):
+    def set_secret_key(cls, secretkey: str) -> None:
         cls.SECRET_KEY = secretkey
 
     @classmethod
-    def recalc_crc32(cls):
+    def recalc_crc32(cls) -> None:
         cls.SECRET_KEY_CRC32 = binascii.crc32(
             cls.SECRET_KEY.encode('utf-8')) & 0XFFFFFFFF
         cls.SECRET_KEY_REVERSED_CRC32 = binascii.crc32(

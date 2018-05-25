@@ -17,6 +17,9 @@ from rikka.utils import parse_netloc, set_non_blocking, \
     format_addr, create_listening_sock
 
 
+from argparse import Namespace
+from socket import socket as socket_t
+
 POS = 0  # expose to tunnel
 NEG = 1  # tunnel to expose
 
@@ -26,7 +29,7 @@ class Server:
     tunnel_addr = ConfigAttribute('tunnel', parse_netloc)
     expose_addr = ConfigAttribute('bind', parse_netloc)
 
-    def __init__(self, pkgbuilder, config):
+    def __init__(self, pkgbuilder: PKGBuilder, config: Config) -> None:
         self._ready = deque()  # task queue
         self._config = config
         self._stopping = False
@@ -44,10 +47,10 @@ class Server:
         self.start_listen()
 
     @property
-    def config(self):
+    def config(self) -> Config:
         return self._config
 
-    def start_listen(self):
+    def start_listen(self) -> None:
         """listen expose conn and tunnel conn"""
         self.expose_sock = create_listening_sock(self.expose_addr)
         self._sel.register(self.expose_sock, selectors.EVENT_READ,
@@ -68,7 +71,7 @@ class Server:
         upper_bound = (2 ** min(self._timeout_count, 7)) - 1
         self._timeout = random.randint(1, upper_bound)
 
-    def reset_timeout(self):
+    def reset_timeout(self) -> None:
         """reset timeout to initial value"""
         self._timeout = 1
         self._timeout_count = 0
@@ -82,7 +85,7 @@ class Server:
 
         logger.info(f'accept user connection from {format_addr(addr)}')
 
-    def accept_tunnel(self, tunnel_sock, mask):
+    def accept_tunnel(self, tunnel_sock: socket_t, mask: int) -> None:
         """accept tunnel connection"""
         conn, addr = tunnel_sock.accept()
         conn.setblocking(False)
@@ -248,7 +251,7 @@ class Server:
                 continue
             return conn
 
-    def run_forever(self):
+    def run_forever(self) -> None:
         """main loop"""
         while not self._stopping:
             events = self._sel.select(timeout=self._timeout)
@@ -264,32 +267,32 @@ class Server:
         logger.info('stopping now ...')
         self.exit()
 
-    def exit(self):
+    def exit(self) -> None:
         """close all listening fds"""
         all_fds = chain(self._wake_fds, self.tunnel_pool,
                         self.work_pool.keys(), self._listening_sock)
         for s in all_fds:
             s.close()
 
-    def init_wake_fds(self):
+    def init_wake_fds(self) -> None:
         self._wake_fds = socket.socketpair()
         for p in self._wake_fds:
             set_non_blocking(p)  # epoll need non-blocking fd
 
-    def init_signal(self):
+    def init_signal(self) -> None:
         self.init_wake_fds()
         signal.signal(signal.SIGINT, lambda *args: None)
         signal.set_wakeup_fd(self._wake_fds[1].fileno())
         self._sel.register(self._wake_fds[0], selectors.EVENT_READ,
                            self.handle_signal)
 
-    def handle_signal(self, expose_sock, mask):
+    def handle_signal(self, expose_sock: socket, mask: int) -> None:
         sig = self._wake_fds[0].recv(1)
         logger.info('recving signal {}'.format(sig))
         self._stopping = True
 
 
-def parse_args():
+def parse_args() -> Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -303,7 +306,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = parse_args()
     config_path = args.config
     delattr(args, 'config')
