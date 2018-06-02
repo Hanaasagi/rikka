@@ -1,21 +1,20 @@
 import json
 from collections import UserDict
-from rikka.exception import ConfigMissing
+from rikka.exceptions import ConfigMissing
 
 
-from argparse import Namespace
-
-from typing import Callable, Dict, List, Optional, Tuple, Union, Any
+from typing import Callable, Dict, List, Optional, Any
 
 
 class ConfigAttribute:
     """Makes an attribute forward to the config"""
 
-    def __init__(self, name: str, get_converter: Optional[Callable] = None) -> None:
+    def __init__(self, name: str,
+                 get_converter: Optional[Callable] = None) -> None:  # is there a better to express callable argument
         self.__name__ = name
         self.get_converter = get_converter
 
-    def __get__(self, obj: Any, tp=None) -> Union[Tuple[str, int], int]:
+    def __get__(self, obj: Any, tp=None) -> Any:
         if obj is None:
             return self
         rv = obj.config[self.__name__]
@@ -23,28 +22,36 @@ class ConfigAttribute:
             rv = self.get_converter(rv)
         return rv
 
-    def __set__(self, obj, value):
+    def __set__(self, obj: Any, value: Any):
         obj.config[self.__name__] = value
 
 
 class Config(UserDict):
 
-    def from_object(self, obj: Namespace) -> None:
+    def from_object(self, obj: Any) -> None:
         self.merge(obj.__dict__)
 
-    def load_file(self, path):
+    def load_file(self, path: str):
         with open(path, 'r') as f:
             data = json.load(f)
             self.update(data)
 
-    def merge(self, d: Dict[str, Union[str, int]]) -> None:
-        for k, v in d.items():
-            self.data[k] = v
+    # def merge(self, d: Dict) -> None:
+        # for k, v in d.items():
+            # self.data[k] = v
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         return self.data[attr]
 
     def validate(self, attrs: List[str]) -> None:
         for attr in attrs:
             if self.data.get(attr) is None:
                 raise ConfigMissing(attr)
+
+    merge = UserDict.update
+
+
+__all__ = [
+    'Config',
+    'ConfigAttribute',
+]

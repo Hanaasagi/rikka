@@ -1,4 +1,5 @@
 import logging
+from rikka.exceptions import ConfigError
 
 
 fmt = "[%(levelname)s %(asctime)-15s] %(message)s"
@@ -10,8 +11,15 @@ sh.setFormatter(formatter)
 logger.addHandler(sh)
 
 
-def name2level(level: str) -> int:
-    return logging.__dict__.get(level.upper())
+def name2level(level_name: str) -> int:
+    """convert level name to logging level[int]"""
+    level_name = level_name.upper()
+    level = logging._nameToLevel.get(level_name)
+    if level is None:
+        raise ConfigError(
+            "logging module doesn't support this level {}".format(level_name)
+        )
+    return level
 
 
 __all__ = [

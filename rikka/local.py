@@ -9,7 +9,7 @@ from collections import deque
 from functools import partial
 from itertools import chain
 from rikka.config import Config, ConfigAttribute
-from rikka.exception import ConfigMissing
+from rikka.exceptions import ConfigMissing
 from rikka.logger import logger, name2level
 from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE, \
     sentinel
@@ -28,13 +28,13 @@ class Local:
     max_spare_count = ConfigAttribute('max_spare_count')
 
     def __init__(self, pkgbuilder: PKGBuilder, config: Config) -> None:
-        self._ready = deque()
+        self._ready: deque = deque()
         self._config = config
         self._stopping = False
         self._pkgbuilder = pkgbuilder
         self._sel = selectors.DefaultSelector()
 
-        self.tunnel_pool = deque()
+        self.tunnel_pool: deque = deque()
         self.working_pool = bidict()
 
         self.init_signal()
@@ -53,7 +53,7 @@ class Local:
     def reset_timeout(self) -> None:
         """reset timeout to initial value"""
         self._timeout = 1
-        self._timeout_count = 0
+        self._timeout_count: int = 0
 
     def _connect_tunnel(self) -> bool:
         """establish tunnel connection"""
@@ -260,7 +260,7 @@ class Local:
     def init_wake_fds(self) -> None:
         self._wake_fds = socket.socketpair()
         for p in self._wake_fds:
-            set_non_blocking(p)
+            set_non_blocking(p.fileno())  # I found this bug from mypy check
 
     def init_signal(self) -> None:
         self.init_wake_fds()
@@ -308,7 +308,7 @@ def main() -> None:
             'max_spare_count',
         ])
     except ConfigMissing as e:
-        logger.error(e)
+        logger.error(e)  # type: ignore
         exit()
 
     logger.setLevel(name2level(args.level))

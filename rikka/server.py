@@ -9,7 +9,7 @@ from collections import deque
 from functools import partial
 from itertools import chain
 from rikka.config import Config, ConfigAttribute
-from rikka.exception import ConfigMissing
+from rikka.exceptions import ConfigMissing
 from rikka.logger import logger, name2level
 from rikka.protocol import Protocol, PKGBuilder, BUF_SIZE, \
     sentinel
@@ -30,13 +30,13 @@ class Server:
     expose_addr = ConfigAttribute('bind', parse_netloc)
 
     def __init__(self, pkgbuilder: PKGBuilder, config: Config) -> None:
-        self._ready = deque()  # task queue
+        self._ready: deque = deque()  # task queue
         self._config = config
         self._stopping = False
         self._pkgbuilder = pkgbuilder
         self._sel = selectors.DefaultSelector()
 
-        self.tunnel_pool = deque()
+        self.tunnel_pool: deque = deque()
         self.work_pool = bidict()
 
         # reinstall signal
@@ -277,7 +277,7 @@ class Server:
     def init_wake_fds(self) -> None:
         self._wake_fds = socket.socketpair()
         for p in self._wake_fds:
-            set_non_blocking(p)  # epoll need non-blocking fd
+            set_non_blocking(p.fileno())  # epoll need non-blocking fd
 
     def init_signal(self) -> None:
         self.init_wake_fds()
@@ -286,7 +286,7 @@ class Server:
         self._sel.register(self._wake_fds[0], selectors.EVENT_READ,
                            self.handle_signal)
 
-    def handle_signal(self, expose_sock: socket, mask: int) -> None:
+    def handle_signal(self, expose_sock: socket_t, mask: int) -> None:
         sig = self._wake_fds[0].recv(1)
         logger.info('recving signal {}'.format(sig))
         self._stopping = True
@@ -322,7 +322,7 @@ def main() -> None:
             'secretkey',
         ])
     except ConfigMissing as e:
-        logger.error(e)
+        logger.error(e)  # type: ignore
         exit()
 
     logger.setLevel(name2level(config.level))

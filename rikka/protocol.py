@@ -1,6 +1,8 @@
 import struct
 import binascii
 
+from typing import Any, Tuple, Sequence, Dict, Type
+
 INTERNAL_VERSION = 0x000D
 BUF_SIZE = 4096
 
@@ -39,21 +41,25 @@ class Protocol:
     @classmethod
     def recalc_crc32(cls) -> None:
         cls.SECRET_KEY_CRC32 = binascii.crc32(
-            cls.SECRET_KEY.encode('utf-8')) & 0XFFFFFFFF
+            cls.SECRET_KEY.encode('utf-8')
+        ) & 0XFFFFFFFF
         cls.SECRET_KEY_REVERSED_CRC32 = binascii.crc32(
-            cls.SECRET_KEY[::-1].encode('utf-8')) & 0XFFFFFFFF
+            cls.SECRET_KEY[::-1].encode('utf-8')
+        ) & 0XFFFFFFFF
 
 
 class PKGBuilder:
 
-    def __init__(self, protocol=Protocol):
+    # how to express subclass of Protocol
+    def __init__(self, protocol: Type[Protocol] = Protocol) -> None:  # type: ignore
         self.protocol = protocol
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.protocol, name)
 
-    def _build_bytes(self, pkg_ver=0x01, pkg_type=0,
-                     prgm_ver=INTERNAL_VERSION, data=(), raw=None):
+    def _build_bytes(self, pkg_ver: int = 0x01, pkg_type: int = 0,
+                     prgm_ver: int = INTERNAL_VERSION,
+                     data: Tuple = (), raw: bytes = None) -> bytes:
         return struct.pack(
             self.protocol.FORMAT_PKG,
             pkg_ver,
@@ -62,30 +68,35 @@ class PKGBuilder:
             raw or self.data_encode(pkg_type, data),
         )
 
-    def data_decode(self, ptype, data_raw):
+    def data_decode(self, ptype: int, data_raw: bytes) -> Tuple:
         return struct.unpack(self.protocol.FORMATS_DATA[ptype], data_raw)
 
-    def data_encode(self, ptype, data):
+    def data_encode(self, ptype: int, data: Sequence) -> bytes:
         return struct.pack(self.protocol.FORMATS_DATA[ptype], *data)
 
-    def pbuild_hs_m2s(self):
-        return self._build_bytes(pkg_type=self.protocol.PTYPE_HS_M2S,
-                                 data=(self.protocol.SECRET_KEY_CRC32,))
+    def pbuild_hs_m2s(self) -> bytes:
+        return self._build_bytes(
+            pkg_type=self.protocol.PTYPE_HS_M2S,
+            data=(self.protocol.SECRET_KEY_CRC32,)
+        )
 
-    def pbuild_hs_s2m(self):
-        return self._build_bytes(pkg_type=self.protocol.PTYPE_HS_S2M,
-                                 data=(self.protocol.SECRET_KEY_REVERSED_CRC32,))  # noqa
+    def pbuild_hs_s2m(self) -> bytes:
+        return self._build_bytes(
+            pkg_type=self.protocol.PTYPE_HS_S2M,
+            data=(self.protocol.SECRET_KEY_REVERSED_CRC32,)
+        )
 
-    def pbuild_heart_beat(self):
+    def pbuild_heart_beat(self) -> bytes:
         return self._build_bytes(pkg_type=self.PTYPE_HEART_BEAT)
 
-    def decode_only(self, raw):
+    def decode_only(self, raw: bytes) -> Dict:
         if not raw or len(raw) != self.protocol.PACKAGE_SIZE:
             raise ValueError("package size should be {}, but {}".format(
                 self.protocol.PACKAGE_SIZE, len(raw)
             ))
         pkg_ver, pkg_type, prgm_ver, data_raw = struct.unpack(
-            self.protocol.FORMAT_PKG, raw)
+            self.protocol.FORMAT_PKG, raw
+        )
         data = self.data_decode(pkg_type, data_raw)
 
         return dict(
@@ -96,14 +107,14 @@ class PKGBuilder:
             raw=raw,
         )
 
-    def decode_verify(self, raw, pkg_type=None):
+    def decode_verify(self, raw: bytes) -> bool:
         try:
             pkg = self.decode_only(raw)
         except ValueError:
             return False
         return self.verify(pkg=pkg)
 
-    def verify(self, pkg):
+    def verify(self, pkg: Dict) -> bool:
         pkg_type = pkg['pkg_type']
         if pkg_type == self.PTYPE_HS_S2M:
             return pkg['data'][0] == self.SECRET_KEY_REVERSED_CRC32
