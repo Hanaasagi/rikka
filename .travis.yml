@@ -1,0 +1,16 @@
+language: python
+python:
+  - "3.6"
+  - "nightly"
+install:
+  - pip install -r requirements.txt
+  - pip install -r test-requirements.txt
+script:
+  - python setup.py check
+  - mypy rikka
+  - flake8 rikka
+branches:
+  only:
+    - master
+notifications:
+  email: false

@@ -3,12 +3,15 @@ import socket
 import fcntl
 
 
-def parse_netloc(netloc):
+from typing import Tuple
+
+
+def parse_netloc(netloc: str) -> Tuple[str, int]:
     ip, _, port = netloc.rpartition(':')
     return ip, int(port)
 
 
-def set_non_blocking(fd):
+def set_non_blocking(fd: int) -> None:
     flags = fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK
     fcntl.fcntl(fd, fcntl.F_SETFL, flags)
 
