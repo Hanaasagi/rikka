@@ -94,7 +94,9 @@ class Local:
     def _handshake(self, conn):
         buff = conn.recv(self._pkgbuilder.PACKAGE_SIZE)
         if (buff == b'' or not
-                self._pkgbuilder.decode_verify(buff, self._pkgbuilder.PTYPE_HS_M2S)):
+                self._pkgbuilder.decode_verify(
+                    buff, self._pkgbuilder.PTYPE_HS_M2S
+                )):
             logger.info('handshake failed')
             conn.close()
             return False
@@ -159,7 +161,9 @@ class Local:
         if data == b'' or need_close:
             try:
                 peer = r_conn.getpeername()
-                logger.info(f'closing tunnel connection from {format_addr(peer)}')
+                logger.info(
+                    f'closing tunnel connection from {format_addr(peer)}'
+                )
             except OSError as e:
                 logger.warn(e)
             self._sel.unregister(r_conn)
@@ -191,7 +195,9 @@ class Local:
         if data == b'' or need_close:
             try:
                 peer = r_conn.getpeername()
-                logger.info(f'closing dest connection from {format_addr(peer)}')
+                logger.info(
+                    f'closing dest connection from {format_addr(peer)}'
+                )
             except OSError as e:
                 logger.warn(e)
             self._sel.unregister(r_conn)

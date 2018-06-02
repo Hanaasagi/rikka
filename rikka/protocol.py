@@ -51,7 +51,8 @@ class Protocol:
 class PKGBuilder:
 
     # how to express subclass of Protocol
-    def __init__(self, protocol: Type[Protocol] = Protocol) -> None:  # type: ignore
+    def __init__(self,
+                 protocol: Type[Protocol] = Protocol) -> None:  # type: ignore
         self.protocol = protocol
 
     def __getattr__(self, name: str) -> Any:

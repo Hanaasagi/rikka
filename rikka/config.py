@@ -3,14 +3,16 @@ from collections import UserDict
 from rikka.exceptions import ConfigMissing
 
 
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, List, Optional, Any
 
 
 class ConfigAttribute:
     """Makes an attribute forward to the config"""
 
     def __init__(self, name: str,
-                 get_converter: Optional[Callable] = None) -> None:  # is there a better to express callable argument
+                 get_converter: Optional[Callable] = None
+                 # is there a better to express callable argument
+                 ) -> None:
         self.__name__ = name
         self.get_converter = get_converter
 
