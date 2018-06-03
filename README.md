@@ -26,5 +26,11 @@ Then, visit `134.233.56.79:8080`, you will see the same page as `localhost:80`
 
 Of course, it's just forwarding TCP traffic transparently. You can use any application layer protocol at will.
 
+### Why rikka
+
+rikka a word from Japanese that means "snow".
+
+![](https://i.imgur.com/tskQvea.png)
+
 ### License
 MIT
