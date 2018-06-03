@@ -1,10 +1,10 @@
 # rikka
 
-![](https://img.shields.io/badge/Python-3.6-0086CC.svg)
-![](https://img.shields.io/badge/version-1.0-EB6EA5.svg)
 [![Build Status](https://travis-ci.org/Hanaasagi/rikka.svg?branch=master)](https://travis-ci.org/Hanaasagi/rikka)
+![](https://img.shields.io/badge/Python-3.6-0086CC.svg)
+![](https://img.shields.io/badge/version-beta-EB6EA5.svg)
 
-let you visit localhost behind NAT or Firewall
+Let you visit localhost behind NAT or Firewall
 
 *It need Python 3.6 and above*
 
