@@ -1,4 +1,5 @@
 import os
+import errno
 import socket
 import signal
 import random
@@ -17,6 +18,8 @@ from rikka.utils import parse_netloc, set_non_blocking, format_addr
 
 from argparse import Namespace
 from socket import socket as socket_t
+from typing import List
+
 POS = 0  # from tunnel to dest
 NEG = 1  # from dest to tunnel
 
@@ -123,7 +126,7 @@ class Local:
 
         self.working_pool[conn] = sock
 
-        buf = (deque(), deque())
+        buf: List[deque] = [deque(), deque()]
         self._sel.modify(conn, selectors.EVENT_WRITE | selectors.EVENT_READ,
                          partial(self.dispatch_tunnel, buf=buf))
         self._sel.register(sock, selectors.EVENT_WRITE | selectors.EVENT_READ,
@@ -165,7 +168,7 @@ class Local:
                     f'closing tunnel connection from {format_addr(peer)}'
                 )
             except OSError as e:
-                logger.warn(e)
+                logger.warn(e)  # type: ignore
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_dest, buf=buf))
@@ -199,7 +202,7 @@ class Local:
                     f'closing dest connection from {format_addr(peer)}'
                 )
             except OSError as e:
-                logger.warn(e)
+                logger.warn(e)  # type: ignore
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_tunnel, buf=buf))
@@ -221,7 +224,7 @@ class Local:
                 return
             byte = w_conn.send(data)
         except socket.error as e:
-            if e.args[0] == socket.errno.EWOULDBLOCK:
+            if e.args[0] == errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to dest')
                 buf[POS].appendleft(data[byte:])
 
@@ -236,7 +239,7 @@ class Local:
                 return
             byte = w_conn.send(data)
         except socket.error as e:
-            if e.args[0] == socket.errno.EWOULDBLOCK:
+            if e.args[0] == errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[NEG].appendleft(data[byte:])
 
