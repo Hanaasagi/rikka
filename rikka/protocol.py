@@ -108,7 +108,7 @@ class PKGBuilder:
             raw=raw,
         )
 
-    def decode_verify(self, raw: bytes) -> bool:
+    def decode_verify(self, raw: bytes, pkg_type=None) -> bool:
         try:
             pkg = self.decode_only(raw)
         except ValueError:

@@ -1,4 +1,5 @@
 import os
+import errno
 import socket
 import signal
 import random
@@ -19,6 +20,7 @@ from rikka.utils import parse_netloc, set_non_blocking, \
 
 from argparse import Namespace
 from socket import socket as socket_t
+from typing import List
 
 POS = 0  # expose to tunnel
 NEG = 1  # tunnel to expose
@@ -108,7 +110,7 @@ class Server:
             )
             return
         self.work_pool[expose_conn] = tunnel_conn
-        buf = (deque(), deque())
+        buf: List[deque] = [deque(), deque()]
         self._sel.register(tunnel_conn,
                            selectors.EVENT_WRITE | selectors.EVENT_READ,
                            partial(self.dispatch_tunnel, buf=buf))
@@ -151,7 +153,7 @@ class Server:
                 peer = r_conn.getpeername()
                 logger.info(f'closing user connection from {format_addr(peer)}')  # noqa
             except OSError as e:
-                logger.warn(e)
+                logger.warn(e)  # type: ignore
             self._sel.unregister(r_conn)
             r_conn.close()
             buf[POS].append(sentinel)
@@ -181,7 +183,7 @@ class Server:
                 peer = r_conn.getpeername()
                 logger.info(f'closing tunnel connection from {format_addr(peer)}')  # noqa
             except OSError as e:
-                logger.warn(e)
+                logger.warn(e)  # type: ignore
             self._sel.unregister(r_conn)
             r_conn.close()
             buf[NEG].append(sentinel)
@@ -202,7 +204,7 @@ class Server:
                 return
             byte = w_conn.send(data)
         except socket.error as e:
-            if e.args[0] == socket.errno.EWOULDBLOCK:
+            if e.args[0] == errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[POS].appendleft(data[byte:])
 
@@ -218,7 +220,7 @@ class Server:
                 return
             byte = w_conn.send(data)
         except socket.error as e:
-            if e.args[0] == socket.errno.EWOULDBLOCK:
+            if e.args[0] == errno.EWOULDBLOCK:
                 logger.info('EWOULDBLOCK occur in send to expose')
                 buf[NEG].appendleft(data[byte:])
 
