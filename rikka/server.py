@@ -20,7 +20,7 @@ from rikka.utils import parse_netloc, set_non_blocking, \
 
 from argparse import Namespace
 from socket import socket as socket_t
-from typing import List
+from typing import List, Optional
 
 POS = 0  # expose to tunnel
 NEG = 1  # tunnel to expose
@@ -67,7 +67,7 @@ class Server:
             self.tunnel_sock,
         ]
 
-    def next_timeout(self):
+    def next_timeout(self) -> None:
         """binary exponential backoff"""
         self._timeout_count += 1
         upper_bound = (2 ** min(self._timeout_count, 7)) - 1
@@ -75,10 +75,10 @@ class Server:
 
     def reset_timeout(self) -> None:
         """reset timeout to initial value"""
-        self._timeout = 1
-        self._timeout_count = 0
+        self._timeout: int = 1  # mypy need this variable type
+        self._timeout_count: int = 0
 
-    def accept_expose(self, expose_sock, mask):
+    def accept_expose(self, expose_sock: socket_t, mask: int) -> None:
         """accept user connection"""
         conn, addr = expose_sock.accept()
         conn.setblocking(False)
@@ -97,7 +97,7 @@ class Server:
         logger.info(f'accept tunnel connection from {format_addr(addr)}, '
                     f'poolsize is {len(self.tunnel_pool)}')
 
-    def prepare_transfer(self, expose_conn, mask):
+    def prepare_transfer(self, expose_conn: socket_t, mask: int) -> None:
         tunnel_conn = self.find_available_tunnel()
         if tunnel_conn is None:  # non-available tunnel_conn
             self._sel.unregister(expose_conn)
@@ -118,21 +118,24 @@ class Server:
                          selectors.EVENT_WRITE | selectors.EVENT_READ,
                          partial(self.dispatch_expose, buf=buf))
 
-    def dispatch_tunnel(self, conn, mask, buf):
+    def dispatch_tunnel(self, conn: socket_t,
+                        mask: int, buf: List[deque]) -> None:
         """schedule tunnel events"""
         if mask & selectors.EVENT_WRITE:
             self.send_to_tunnel(conn, mask, buf)
         if mask & selectors.EVENT_READ:
             self.transfer_from_tunnel(conn, mask, buf)
 
-    def dispatch_expose(self, conn, mask, buf):
+    def dispatch_expose(self, conn: socket_t,
+                        mask: int, buf: List[deque]) -> None:
         """schedule expose events"""
         if mask & selectors.EVENT_WRITE:
             self.send_to_expose(conn, mask, buf)
         if mask & selectors.EVENT_READ:
             self.transfer_from_expose(conn, mask, buf)
 
-    def transfer_from_expose(self, r_conn, mask, buf):
+    def transfer_from_expose(self, r_conn: socket_t,
+                             mask: int, buf: List[deque]) -> None:
         """receive data from expose and store in buffer"""
         w_conn = self.work_pool.get(r_conn)
         if w_conn is None:
@@ -162,7 +165,8 @@ class Server:
 
         buf[POS].append(data)
 
-    def transfer_from_tunnel(self, r_conn, mask, buf):
+    def transfer_from_tunnel(self, r_conn: socket_t,
+                             mask: int, buf: List[deque]) -> None:
         """receive data from tunnel and store in buffer"""
         w_conn = self.work_pool.inv.get(r_conn)
         if w_conn is None:
@@ -192,7 +196,8 @@ class Server:
 
         buf[NEG].append(data)
 
-    def send_to_tunnel(self, w_conn, mask, buf):
+    def send_to_tunnel(self, w_conn: socket_t,
+                       mask: int, buf: List[deque]) -> None:
         """send buffer data to tunnel"""
         if not len(buf[POS]):
             return
@@ -208,7 +213,8 @@ class Server:
                 logger.info('EWOULDBLOCK occur in send to tunnel')
                 buf[POS].appendleft(data[byte:])
 
-    def send_to_expose(self, w_conn, mask, buf):
+    def send_to_expose(self, w_conn: socket_t,
+                       mask: int, buf: List[deque]) -> None:
         """send buffer data to expose"""
         if not len(buf[NEG]):
             return
@@ -224,7 +230,7 @@ class Server:
                 logger.info('EWOULDBLOCK occur in send to expose')
                 buf[NEG].appendleft(data[byte:])
 
-    def _handshake(self, conn_slaver):
+    def _handshake(self, conn_slaver: socket_t) -> bool:
         """handshake"""
         conn_slaver.setblocking(True)  # TODO use nonblocking IO
         conn_slaver.send(self._pkgbuilder.pbuild_hs_m2s())
@@ -235,7 +241,7 @@ class Server:
         return self._pkgbuilder.decode_verify(buff,
                                               self._pkgbuilder.PTYPE_HS_S2M)
 
-    def find_available_tunnel(self):
+    def find_available_tunnel(self) -> Optional[socket_t]:
         while True:
             try:
                 conn = self.tunnel_pool.popleft()
@@ -244,7 +250,7 @@ class Server:
                 # do not need to wait in a loop, because we work in LT Mode
                 self.next_timeout()
                 logger.info('no available tunnel connection, waiting')
-                return
+                return None
             else:
                 self.reset_timeout()
 

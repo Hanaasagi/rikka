@@ -1,7 +1,7 @@
 import struct
 import binascii
 
-from typing import Any, Tuple, Sequence, Dict, Type
+from typing import Any, Tuple, Sequence, Dict, Type, Optional
 
 INTERNAL_VERSION = 0x000D
 BUF_SIZE = 4096
@@ -52,7 +52,7 @@ class PKGBuilder:
 
     # how to express subclass of Protocol
     def __init__(self,
-                 protocol: Type[Protocol] = Protocol) -> None:  # type: ignore
+                 protocol: Type[Protocol] = Protocol) -> None:
         self.protocol = protocol
 
     def __getattr__(self, name: str) -> Any:
@@ -60,7 +60,7 @@ class PKGBuilder:
 
     def _build_bytes(self, pkg_ver: int = 0x01, pkg_type: int = 0,
                      prgm_ver: int = INTERNAL_VERSION,
-                     data: Tuple = (), raw: bytes = None) -> bytes:
+                     data: Tuple = (), raw: Optional[bytes] = None) -> bytes:
         return struct.pack(
             self.protocol.FORMAT_PKG,
             pkg_ver,
@@ -108,7 +108,8 @@ class PKGBuilder:
             raw=raw,
         )
 
-    def decode_verify(self, raw: bytes, pkg_type=None) -> bool:
+    def decode_verify(self, raw: bytes,
+                      pkg_type: Optional[int] = None) -> bool:
         try:
             pkg = self.decode_only(raw)
         except ValueError:
