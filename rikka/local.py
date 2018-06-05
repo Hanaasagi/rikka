@@ -18,7 +18,7 @@ from rikka.utils import parse_netloc, set_non_blocking, format_addr
 
 from argparse import Namespace
 from socket import socket as socket_t
-from typing import List
+from typing import List, Optional
 
 POS = 0  # from tunnel to dest
 NEG = 1  # from dest to tunnel
@@ -76,17 +76,17 @@ class Local:
                     f'poolsize is {len(self.tunnel_pool)}')
         return True
 
-    def _connect_dest(self):
+    def _connect_dest(self) -> Optional[socket_t]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
         try:
             sock.connect(self.dest_addr)
         except socket.timeout:
             logger.info('connect dest timeout')
-            return
+            return None
         except ConnectionRefusedError:
             logger.info('dest refused connection')
-            return
+            return None
 
         logger.info('connected to dest {} at {}'.format(
             format_addr(sock.getpeername()),
@@ -94,7 +94,7 @@ class Local:
         ))
         return sock
 
-    def _handshake(self, conn):
+    def _handshake(self, conn: socket_t) -> bool:
         buff = conn.recv(self._pkgbuilder.PACKAGE_SIZE)
         if (buff == b'' or not
                 self._pkgbuilder.decode_verify(
@@ -110,7 +110,7 @@ class Local:
         conn.setblocking(False)
         return True
 
-    def prepare_transfer(self, conn, mask):
+    def prepare_transfer(self, conn: socket_t, mask: int) -> None:
         self.tunnel_pool.remove(conn)
         if not self._handshake(conn):
             self._sel.unregister(conn)
@@ -132,21 +132,24 @@ class Local:
         self._sel.register(sock, selectors.EVENT_WRITE | selectors.EVENT_READ,
                            partial(self.dispatch_dest, buf=buf))
 
-    def dispatch_tunnel(self, conn, mask, buf):
+    def dispatch_tunnel(self, conn: socket_t,
+                        mask: int, buf: List[deque]) -> None:
         """schedule tunnel events"""
         if mask & selectors.EVENT_WRITE:
             self.send_to_tunnel(conn, mask, buf)
         if mask & selectors.EVENT_READ:
             self.transfer_from_tunnel(conn, mask, buf)
 
-    def dispatch_dest(self, conn, mask, buf):
+    def dispatch_dest(self, conn: socket_t,
+                      mask: int, buf: List[deque]) -> None:
         """schedule dest events"""
         if mask & selectors.EVENT_WRITE:
             self.send_to_dest(conn, mask, buf)
         if mask & selectors.EVENT_READ:
             self.transfer_from_dest(conn, mask, buf)
 
-    def transfer_from_tunnel(self, r_conn, mask, buf):
+    def transfer_from_tunnel(self, r_conn: socket_t,
+                             mask: int, buf: List[deque]) -> None:
         """receive data from tunnel and store in buffer"""
         w_conn = self.working_pool.get(r_conn)
         if w_conn is None:
@@ -179,7 +182,8 @@ class Local:
 
         buf[POS].append(data)
 
-    def transfer_from_dest(self, r_conn, mask, buf):
+    def transfer_from_dest(self, r_conn: socket_t,
+                           mask: int, buf: List[deque]) -> None:
         """receive data from dest and store in buffer"""
         w_conn = self.working_pool.inv.get(r_conn)
         if w_conn is None:
@@ -213,7 +217,8 @@ class Local:
 
         buf[NEG].append(data)
 
-    def send_to_dest(self, w_conn, mask, buf):
+    def send_to_dest(self, w_conn: socket_t,
+                     mask: int, buf: List[deque]) -> None:
         if not len(buf[POS]):
             return
         try:
@@ -228,7 +233,8 @@ class Local:
                 logger.info('EWOULDBLOCK occur in send to dest')
                 buf[POS].appendleft(data[byte:])
 
-    def send_to_tunnel(self, w_conn, mask, buf):
+    def send_to_tunnel(self, w_conn: socket_t,
+                       mask: int, buf: List[deque]) -> None:
         if not len(buf[NEG]):
             return
         try:
