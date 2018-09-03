@@ -171,7 +171,7 @@ class Local:
                     f'closing tunnel connection from {format_addr(peer)}'
                 )
             except OSError as e:
-                logger.warn(e)  # type: ignore
+                logger.warn(e)
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_dest, buf=buf))
@@ -206,7 +206,7 @@ class Local:
                     f'closing dest connection from {format_addr(peer)}'
                 )
             except OSError as e:
-                logger.warn(e)  # type: ignore
+                logger.warn(e)
             self._sel.unregister(r_conn)
             self._sel.modify(w_conn, selectors.EVENT_WRITE,
                              partial(self.send_to_tunnel, buf=buf))
@@ -323,7 +323,7 @@ def main() -> None:
             'max_spare_count',
         ])
     except ConfigMissing as e:
-        logger.error(e)  # type: ignore
+        logger.error(e)
         exit()
 
     logger.setLevel(name2level(args.level))

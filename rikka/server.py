@@ -156,7 +156,7 @@ class Server:
                 peer = r_conn.getpeername()
                 logger.info(f'closing user connection from {format_addr(peer)}')  # noqa
             except OSError as e:
-                logger.warn(e)  # type: ignore
+                logger.warn(e)
             self._sel.unregister(r_conn)
             r_conn.close()
             buf[POS].append(sentinel)
@@ -187,7 +187,7 @@ class Server:
                 peer = r_conn.getpeername()
                 logger.info(f'closing tunnel connection from {format_addr(peer)}')  # noqa
             except OSError as e:
-                logger.warn(e)  # type: ignore
+                logger.warn(e)
             self._sel.unregister(r_conn)
             r_conn.close()
             buf[NEG].append(sentinel)
@@ -330,7 +330,7 @@ def main() -> None:
             'secretkey',
         ])
     except ConfigMissing as e:
-        logger.error(e)  # type: ignore
+        logger.error(e)
         exit()
 
     logger.setLevel(name2level(config.level))
