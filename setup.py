@@ -28,11 +28,13 @@ setup(
     author_email='ambiguous404@gmail.com',
     license='MIT',
     python_requires='>=3.6',
-
     classifiers=[
         'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3 :: Only',
         'Programming Language :: Python :: 3.6',
-        'Topic :: Internet :: TCP Proxy',
+        'Programming Language :: Python :: 3.7',
+        'Topic :: Internet',
+        'Topic :: Internet :: Proxy Servers',
     ],
     packages=['rikka'],
     install_requires=requirements,
