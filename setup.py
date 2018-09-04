@@ -23,6 +23,7 @@ setup(
     version=version,
     description='Expose localhost to public Internet',
     long_description=readme,
+    long_description_content_type='text/markdown',
     url='https://github.com/Hanaasagi/rikka',
     author='Hanaasagi',
     author_email='ambiguous404@gmail.com',
